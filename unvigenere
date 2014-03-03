@@ -1,4 +1,4 @@
-#!/usr/bin/perl -d:NYTProf
+#!/usr/bin/perl
 
 
 package Vim::Netbeans::Buffer;
@@ -1391,7 +1391,7 @@ sub main {
 	if ($output_file eq '-') {
 		print $decyphered_text;
 	} else {
-		open(my $fd, '<', $output_file) or die($!);
+		open(my $fd, '>', $output_file) or die($!);
 		print $fd $decyphered_text;
 		close($fd) or die($!);
 	}
