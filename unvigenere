@@ -1,0 +1,1403 @@
+#!/usr/bin/perl -d:NYTProf
+
+
+package Vim::Netbeans::Buffer;
+# This class encapsulate the use of a specific buffer
+use Data::Dumper;
+
+sub new {
+	my $class = shift;
+	my $nb = shift;
+	my $bufid = shift;
+	my $self = {
+		nb => $nb,
+		bufid => $bufid
+	};
+
+	return bless $self, $class;
+}
+
+
+
+sub register {
+	my $self = shift;
+	my $event = shift;
+	my $fun = shift;
+
+	# Wrap $fun to filter on the bufid
+	my $myfun = sub {
+		my $bufid = shift;
+		return if ($bufid != $self->{bufid});
+
+		$fun->($bufid, @_);
+	};
+
+	$self->{nb}->register($event, $fun);
+}
+
+
+
+sub startAtomic {
+	my $self = shift;
+	$self->{nb}->startAtomic($self->{bufid}, @_);
+}
+
+
+
+sub endAtomic {
+	my $self = shift;
+	$self->{nb}->endAtomic($self->{bufid}, @_);
+}
+
+
+
+sub guard {
+	my $self = shift;
+	$self->{nb}->guard($self->{bufid}, @_);
+}
+
+
+
+sub getText {
+	my $self = shift;
+	$self->{nb}->getText($self->{bufid}, @_);
+}
+
+
+
+sub remove {
+	my $self = shift;
+	$self->{nb}->remove($self->{bufid}, @_);
+}
+
+
+
+sub insert_async {
+	my $self = shift;
+	$self->{nb}->insert_async($self->{bufid}, @_);
+}
+
+
+
+sub insert_sync {
+	my $self = shift;
+	$self->{nb}->insert_sync($self->{bufid}, @_);
+}
+
+
+
+sub insert {
+	my $self = shift;
+	$self->{nb}->insert($self->{bufid}, @_);
+}
+
+
+
+sub insertDone {
+	my $self = shift;
+	$self->{nb}->insertDone($self->{bufid}, @_);
+}
+
+
+
+sub initDone {
+	my $self = shift;
+	$self->{nb}->initDone($self->{bufid}, @_);
+}
+
+
+
+sub setDot {
+	my $self = shift;
+	$self->{nb}->setDot($self->{bufid}, @_);
+}
+
+
+
+package Vim::Netbeans;
+
+use IO::Socket::INET;
+
+#use Vim::Netbeans::Buffer;
+use Carp qw(carp verbose);
+use Data::Dumper;
+
+
+
+sub new {
+	my $class = shift;
+	my $self = {
+		connected => 0,
+		callback  => {},
+		onreply   => {}
+	};
+
+	return bless $self, $class;
+}
+
+
+
+sub accept {
+	my $self = shift;
+
+	my $sock = IO::Socket::INET->new(
+		Listen    => 5,
+		LocalAddr => 'localhost',
+		LocalPort => 3219,
+		Proto     => 'tcp',
+		ReuseAddr => 1
+	) or die($!);
+
+	my $s = $self->{s} = $sock->accept() or die($!);
+
+	$_ = <$s>;
+	die("Protocol error") if (!/^AUTH/);
+
+	# Skip first lines until 0:startupDone=0
+	while (<$s>) {
+		chomp;
+		last if (/^0:startupDone=0$/);
+	}
+
+	$self->{connected} = 1;
+	$self->{nextseqno} = 1;
+	$self->{nextbufid} = 1;
+
+	$_->($self) foreach (@{$self->{callback}->{startupDone}});
+
+	return $self;
+}
+
+
+
+sub register {
+	my $self = shift;
+	my $event = shift;
+	my $fun = shift;
+
+	push @{$self->{callback}->{$event}}, $fun;
+}
+
+
+
+sub _register_reply {
+	my $self = shift;
+	my $seqno = shift;
+	my $fun_name = shift;
+	my $fun = shift;
+
+	push @{$self->{onreply}->{$seqno}}, {name => $fun_name, fun => $fun};
+}
+
+
+
+sub connected {
+	my $self = shift;
+	return $self->{connected};
+}
+
+
+
+sub _raw_command {
+	my $self = shift;
+	my $bufid = shift;
+	my $cmd = shift;
+	my @args = @_;
+	my $strargs = join ' ', @args;
+	my $seqno = $self->{nextseqno}++;
+
+	my $s = $self->{s};
+	#print "$bufid:$cmd!$seqno $strargs\n";
+	print $s "$bufid:$cmd!$seqno $strargs\n";
+}
+
+
+
+sub _raw_function {
+	my $self = shift;
+	my $bufid = shift;
+	my $cmd = shift;
+	my @args = @_;
+	my $strargs = join ' ', @args;
+	my $seqno = $self->{nextseqno}++;
+
+	my $s = $self->{s};
+	#print "$bufid:$cmd/$seqno $strargs\n";
+	print $s "$bufid:$cmd/$seqno $strargs\n";
+}
+
+
+
+sub create {
+	my $self = shift;
+	my $bufid = $self->{nextbufid}++;
+	$self->_raw_command($bufid, "create");
+	my $buf = Vim::Netbeans::Buffer->new($self, $bufid);
+	push @{$self->{buffers}}, $buf;
+	return $buf;
+}
+
+
+
+sub remove {
+	my $self = shift;
+	my $bufid = shift;
+	my $off = shift;
+	my $len = shift;
+	my $fun = shift;
+
+	$self->_register_reply($self->{nextseqno}, $fun) if (defined $fun);
+	$self->_raw_function($bufid, "remove", $off, $len);
+}
+
+
+
+sub getText_async {
+	my $self = shift;
+	my $bufid = shift;
+	my $reply_fun = shift;
+
+	$self->_register_reply($self->{nextseqno}, "getText", $reply_fun) if (defined $reply_fun);
+	$self->_raw_function($bufid, "getText", $offset, $str);
+}
+
+
+
+sub getText_sync {
+	my $self = shift;
+	my $bufid = shift;
+
+	my @res;
+	my $reply_recieved = 0;
+
+	my $fun = sub {
+		@res = @_;
+		$reply_recieved = 1;
+	};
+
+	$self->getText_async($bufid, $fun);
+
+	# Process next message until the reply message is recieved
+	$self->one_loop() while (!$reply_recieved);
+	shift @res;
+	return @res;
+}
+
+
+
+sub getText {
+	my $self = shift;
+	$self->getText_sync(@_);
+}
+
+
+
+sub insert_async {
+	my $self = shift;
+	my $bufid = shift;
+	my $offset = shift;
+	my $str = shift;
+	my $reply_fun = shift;
+
+	$str =~ s/\n/\\n/g;
+	$str =~ s/\r/\\r/g;
+	$str =~ s/\t/\\t/g;
+	$str =~ s/\"/\\"/g;
+	$str = '"'.$str.'"';
+
+	$self->_register_reply($self->{nextseqno}, "insert", $reply_fun) if (defined $reply_fun);
+	$self->_raw_function($bufid, "insert", $offset, $str);
+}
+
+
+
+sub insert_sync {
+	my $self = shift;
+	my $bufid = shift;
+	my $offset = shift;
+	my $str = shift;
+
+	my @res;
+	my $reply_recieved = 0;
+
+	my $fun = sub {
+		@res = @_;
+		$reply_recieved = 1;
+	};
+
+	$self->insert_async($bufid, $offset, $str, $fun);
+
+	# Process next message until the reply message is recieved
+	$self->one_loop() while (!$reply_recieved);
+	shift @res;
+	return @res;
+}
+
+
+
+sub insert {
+	my $self = shift;
+	$self->insert_sync(@_);
+}
+
+
+
+sub getCursor_async {
+	my $self = shift;
+	my $fun = shift;
+
+	$self->_register_reply($self->{nextseqno}, "getCursor", $fun) if (defined $fun);
+	$self->_raw_function(0, "getCursor");
+}
+
+
+
+sub getCursor_sync {
+	my $self = shift;
+	my @res;
+	my $reply_recieved = 0;
+
+	my $fun = sub {
+		@res = @_;
+		$reply_recieved = 1;
+	};
+
+	$self->getCursor_async($fun);
+
+	# Process next message until the reply message is recieved
+	$self->one_loop() while (!$reply_recieved);
+	shift @res;
+	return @res;
+}
+
+
+
+sub getCursor {
+	my $self = shift;
+	$self->getCursor_sync(@_);
+}
+
+
+
+sub insertDone {
+	my $self = shift;
+	my $bufid = shift;
+
+	$self->_raw_command($bufid, "insertDone");
+}
+
+
+
+sub initDone {
+	my $self = shift;
+	my $bufid = shift;
+
+	$self->_raw_command($bufid, "initDone");
+}
+
+
+
+sub startAtomic {
+	my $self = shift;
+	my $bufid = shift;
+
+	$self->_raw_command($bufid, "startAtomic");
+}
+
+
+
+sub endAtomic {
+	my $self = shift;
+	my $bufid = shift;
+
+	$self->_raw_command($bufid, "endAtomic");
+}
+
+
+
+sub guard {
+	my $self = shift;
+	my $bufid = shift;
+	my $offset = shift;
+	my $len = shift;
+
+	$self->_raw_command($bufid, "guard", $offset, $len);
+}
+
+
+
+sub setDot {
+	my $self = shift;
+	my $bufid = shift;
+	my $off = shift;
+
+	$self->_raw_command($bufid, "setDot", $off);
+}
+
+
+
+sub dispatch_event {
+	my $self = shift;
+	my $buf = shift;
+	my $ev = shift;
+	my $seq = shift;
+	my $rest = shift;
+	my @args;
+
+	if ($ev eq "insert") {
+		my ($off, $text) = ($rest =~ /(\d+) "(.*)"$/);
+
+		$text =~ s/\\n/\n/g;
+		$text =~ s/\\r/\r/g;
+		$text =~ s/\\t/\t/g;
+		$text =~ s/\\"/\"/g;
+
+		@args = ($off, $text);
+
+	} elsif ($ev eq "remove") {
+		my ($off, $len) = ($rest =~ /(\d+) (\d+)$/);
+		@args = ($off, $len);
+	} elsif ($ev eq "killed") {
+		# TODO inform the buffer that it no longer exists
+
+	} elsif ($ev eq "unmodified") {
+		# Nothing todo
+
+	} elsif ($ev eq "disconnect") {
+		$self->{connected} = 0;
+		close($self->{s});
+
+	} else {
+		warn "Unknown event $ev\n";
+		return;
+	}
+
+	if ($self->{callback}->{$ev}) {
+		$_->($buf, $ev, $seq, @args) foreach (@{$self->{callback}->{$ev}});
+	}
+}
+
+
+
+sub dispatch_reply {
+	my $self = shift;
+	my $seq = shift;
+	my $rest = shift;
+	my @args;
+
+	return if (!defined $self->{onreply}->{$seq});
+
+	# Even of there are several callbacks, one sequence number corresponds
+	# to one function call. Therefore to one reply format.
+
+	my $fun_name = $self->{onreply}->{$seq}->[0]->{name};
+
+	if ($fun_name eq "insert") {
+		@args = ($rest);
+
+	} elsif ($fun_name eq "getCursor") {
+		my ($bufid, $lnum, $col, $off) = ($rest =~ /(\d+) (\d+) (\d+) (\d+)$/);
+		@args = ($bufid, $lnum, $col, $off);
+
+	} elsif ($fun_name eq "getText") {
+		my ($text) = ($rest =~ /"(.*)"$/);
+
+		$text =~ s/\\n/\n/g;
+		$text =~ s/\\r/\r/g;
+		$text =~ s/\\t/\t/g;
+		$text =~ s/\\"/\"/g;
+
+		@args = ($text);
+
+	} else {
+		warn "Unknown function reply $fun_name\n";
+		$args[0] = $rest;
+	}
+
+	$_->{fun}->($seq, @args) foreach (@{$self->{onreply}->{$seq}});
+
+	# Replies are one-shot callbacks
+	undef $self->{onreply}->{$seq};
+}
+
+
+
+sub one_loop {
+	my $self = shift;
+
+	my $s = $self->{s};
+	local $_ = <$s>;
+
+	if (!defined) {
+		$self->{connected} = 0;
+		return;
+	}
+
+	#print;
+	chomp;
+
+	if (/^\d+:[A-Za-z]+=\d+/) {
+		# Event
+		my ($buf, $ev, $seq, $rest) = /^(\d+):([A-Za-z]+)=(\d+) ?(.*)$/;
+		$self->dispatch_event($buf, $ev, $seq, $rest);
+	} else {
+		# Function reply
+		my ($seq, $rest) = /^(\d+) ?(.*)$/;
+		$self->dispatch_reply($seq, $rest);
+	}
+}
+
+
+
+sub run {
+	my $self = shift;
+
+	$self->accept() if (!$self->connected());
+	while ($self->{connected}) {
+		$self->one_loop();
+	}
+}
+
+
+
+package main;
+
+
+use warnings;
+use strict;
+use threads;
+use List::Util qw(sum max);
+use List::MoreUtils qw(part all);
+use Getopt::Long;
+use Term::ANSIColor;
+#use Vim::Netbeans;
+use Data::Dumper;
+
+
+# TODO factorize the length found by ci in order to avoid multiple of the real length
+# Do a basic count? Weight the count by the ci of the factorized length?
+# TODO checker --help
+# TODO before vim is actually run, do an approximate cut of the key (like the final one, but approximative)
+# TODO use the possible key length to weight the likehood of cutting the key
+# TODO refactor kasiski & ci
+
+
+
+my %lang_freq = (
+	english => {
+		A => 8.08, B => 1.67, C => 3.18, D => 3.99, E => 12.56,
+		F => 2.17, G => 1.80, H => 5.27, I => 7.24, J => 0.14,
+		K => 0.63, L => 4.04, M => 2.60, N => 7.38, O => 7.47,
+		P => 1.91, Q => 0.09, R => 6.42, S => 6.59, T => 9.15,
+		U => 2.79, V => 1.00, W => 1.89, X => 0.21, Y => 1.65,
+		Z => 0.07
+	},
+	french => {
+		A => 9.2,  B => 1.02, C => 2.64, D => 3.39, E => 15.87,
+		F => 0.95, G => 1.04, H => 0.77, I => 8.41, J => 0.89,
+		K => 0.00, L => 5.34, M => 3.24, N => 7.15, O => 5.14,
+		P => 2.86, Q => 1.06, R => 6.46, S => 7.90, T => 7.26,
+		U => 6.24, V => 2.15, W => 0.00, X => 0.30, Y => 0.24,
+		Z => 0.32
+	}
+);
+
+
+
+sub avg {
+	return sum (@_) / @_;
+}
+
+
+
+sub letter_count {
+	return scalar ($_[0] =~ y/A-Za-z//);
+}
+
+
+
+sub normalize_text {
+	my $text = shift;
+
+	$text =~ s/[^A-Za-z]//g;
+	return $text;
+}
+
+
+
+# shift the given letter with the given offset.
+# The offset is an uppercase letter.
+# This function keep the case of the input letter
+sub alpha_shift {
+	my $c = ord(shift);
+	my $n = ord(shift) - ord('A');
+	my $A = ord('A');
+	my $a = ord('a');
+
+	return chr($A + (($c - $A + $n) % 26)) if ($c >= $A && $c <= ord('Z'));
+	return chr($a + (($c - $a + $n) % 26)) if ($c >= $a && $c <= ord('z'));
+	return chr($c);
+}
+
+
+
+# Just compute the coincidence index of the given text (made of letters only)
+sub coincidence {
+	my $text = shift;
+	my $len = @$text;
+	my %count;
+	my $idx = 0;
+
+	map {$count{uc($_)}++} @$text;
+
+	foreach my $v (values %count) {
+		$idx += ($v * ($v - 1)) / ($len * ($len - 1));
+	}
+
+	return $idx;
+}
+
+
+
+# Compute the coincidence index for all the offset for a given space between letters
+sub coincidence_len {
+	my $len = shift;
+	my $text = shift;
+
+	my $i = 0;
+
+	my @parts = part {$i++ % $len} (@$text);
+
+	my @ci = map { coincidence($_) } @parts;
+	return ($len => \@ci);
+}
+
+
+
+# Compute the coincidence index for all the possible length of key
+sub compute_ci {
+	my $text = shift;
+	my $max = shift;
+
+	my @ntext = split //, normalize_text($text);
+
+	return (map { coincidence_len($_, \@ntext) } (1 .. $max));
+}
+
+
+
+# Return the list of the factors of the given number.
+# ALL the factors, not only the prime ones, including 1 and the number itself.
+sub factors {
+	my $n = shift;
+
+	return grep {$n % $_ == 0} (1 .. $n);
+}
+
+
+
+# Compute the numbre of substring that match the text with itself when shifted by the given length
+sub kasiski_len {
+	my $len = shift;
+	my $min = shift;
+	my $text = shift;
+
+	my $count = 0;
+	my $start_match;
+
+	foreach my $i (0 .. $#$text - $len) {
+		if ($text->[$i] eq $text->[$i + $len]) {
+			$start_match = $i if (!defined $start_match);
+		} else {
+
+			# end of a substring match
+			if (defined $start_match) {
+				# Count it iff its length is greater than $min
+				$count++ if (($i - $start_match) >= $min);
+				undef $start_match;
+			}
+		}
+	}
+
+	# End of stringis always the end of a substring match
+	if (defined $start_match) {
+		# Count it iff its length is greater than $min
+		$count++ if (((@$text - $len) - $start_match) >= $min);
+		undef $start_match;
+	}
+
+	return () if ($count == 0);
+	return ($len => $count);
+}
+
+
+
+# Compute the kasiski factors for every possible length of key
+sub compute_km {
+	my $text = shift;
+	my $min = shift;
+
+	my %ret;
+	my @ntext = split //, normalize_text($text);
+
+	my %counts = map { kasiski_len($_, $min, \@ntext) } (1 .. @ntext - $min);
+
+	# take the factors into account
+	foreach my $l (keys %counts) {
+		map {$ret{$_} += $counts{$l}} factors($l);
+	}
+
+	# Key length 1 is not interresting
+	#delete $ret{1};
+
+	return %ret;
+}
+
+
+
+sub correlation {
+	my $freq1 = shift;
+	my $freq2 = shift;
+
+	my $avg1 = avg(values %$freq1);
+	my $avg2 = avg(values %$freq2);
+
+	my $co = sum(map { ($freq1->{$_} - $avg1) * ($freq2->{$_} - $avg2) } (keys %$freq1));
+	my $var1 = sqrt(sum(map {($freq1->{$_} - $avg1) ** 2} (keys %$freq1)));
+	my $var2 = sqrt(sum(map {($freq2->{$_} - $avg2) ** 2} (keys %$freq2)));
+
+	return $co / ($var1 * $var2);
+}
+
+
+
+sub shift_freq {
+	my $freq = shift;
+	my $n = shift;
+
+	my %newfreq = map { alpha_shift($_, $n) => $freq->{$_} } (keys %$freq);
+	return \%newfreq;
+}
+
+
+
+sub freq_analysis {
+	my $text = shift;
+	my $lang = shift;
+
+	my %freq = map {$_ => 0} ('A' .. 'Z');
+
+	map {$freq{uc($_)}++} @$text;
+
+	my %corr = map {$_ => correlation($lang_freq{$lang}, shift_freq(\%freq, $_))} ('A' .. 'Z');
+	my @sorted_keys = sort {$corr{$b} <=> $corr{$a}} (keys %corr);
+
+	# TODO what if this was not the right choice?
+	return $sorted_keys[0];
+}
+
+
+
+sub multi_freq {
+	my $text = shift;
+	my $key_len = shift;
+	my $lang = shift;
+
+	my @ntext = split //, normalize_text($text);
+
+	my $i = 0;
+	my @parts = part {$i++ % $key_len} (@ntext);
+
+	my @key = map {freq_analysis($_, $lang)} @parts;
+	return join '', @key;
+}
+
+
+
+sub decypher_text {
+	my $input = shift;
+	my $key = shift;
+
+	my $output;
+	my @input = split //, $input;
+	my @key = split //, $key;
+
+	my $kidx = 0;
+	foreach (@input) {
+		if (/[A-Z]/i) {
+			$output .= alpha_shift($_, $key[$kidx]);
+			$kidx = ($kidx + 1) % @key;
+		} else {
+			$output .= $_;
+		}
+	}
+
+	return $output;
+}
+
+
+# Compute the key such as decyphering will actually cypher
+# The key must be all uppercase
+sub opposed_key {
+	my @inkey = split //, shift;
+	my $A = ord('A');
+	my @dkey = map {ord($_) - $A} @inkey;
+	my @outkey = map {chr((26 - $_) % 26 + $A)} @dkey;
+
+	return (join '', @outkey);
+}
+
+
+
+sub split_text {
+	my $input = shift;
+
+	my %ret;
+	my @input = split //, $input;
+	my $start_word;
+	my $start_idx;
+	my $idx = 0;
+
+	foreach my $i (0 .. $#input) {
+		if ($input[$i] =~ /[A-Z]/i) {
+			if (!defined $start_word) {
+				$start_word = $i; # Help to extract the word
+				$start_idx = $idx; # index of usable character
+			}
+
+			$idx++;
+		} else {
+
+			# end of a word
+			if (defined $start_word) {
+				$ret{$start_idx} = join '', @input[$start_word .. $i-1];
+				undef $start_word;
+			}
+		}
+	}
+
+	# End of string is always the end of a word
+	if (defined $start_word) {
+		$ret{$start_idx} = join '', @input[$start_word .. $#input];
+		undef $start_word;
+	}
+
+	return %ret;
+}
+
+
+
+sub distance {
+# This version is too slow...
+#	my @w1 = split //, shift;
+#	my @w2 = split //, shift;
+#	my $count = 0;
+#
+#	pairwise {$count++ if ($a eq $b)} @w1, @w2;
+
+	my $w1 = shift;
+	my $w2 = shift;
+	my $count = ($w1 ^ $w2) =~ tr/\x{00}//;
+	return $count;
+}
+
+
+
+sub close_words {
+	my $target = shift;
+	my $wordlist = shift;
+
+	# Compute the distance for each word
+	# The first alternative is too costly. The "distance" function is inlined
+	#my %match = map { $_ => distance($target, $_) } @$wordlist;
+	my %match = map { $_ => ($target ^ $_) =~ tr/\x{00}// } @$wordlist;
+
+	# Keep only the words with the highest similarities
+	my $max_match = max(values %match);
+	my @word_match = grep {$match{$_} == $max_match} (keys %match);
+	return ($max_match, @word_match);
+}
+
+
+
+sub patch_key {
+	my $offset = shift;
+	my @oldword = split //, shift;
+	my @newword = split //, shift;
+	my @oldkey = split //, shift;
+
+	my @newkey = @oldkey;
+
+	# Compute newkey such that:
+	# oldword - oldkey = newword - newkey
+	# -newkey = oldword - oldkey - newword
+	# newkey = -oldword + oldkey + newword
+	#        = newword - oldword + oldkey
+	# But do not touch the part of the key that are not affected by the new word
+
+	# TODO detect unfeasible patch
+	# This could be used to try several new words and keep only the ones feasible
+	foreach my $i (0 .. $#oldword) {
+		my $kidx = ($i + $offset) % @oldkey;
+		$newkey[$kidx] = chr((ord($newword[$i]) - ord($oldword[$i]) + ord($oldkey[$kidx]) - ord('A')) % 26 + ord('A'));
+	}
+
+	return join '', @newkey;
+}
+
+
+
+sub patch_key_wordlist {
+	my $input_text = shift;
+	my $key = shift;
+	my $wordlist_file = shift;
+	my %subst;
+
+	my @wordlist;
+
+	# Read the wordlist
+	open(my $fd, '<', $wordlist_file) or (warn($!) and return);
+	foreach (<$fd>) {
+		chomp;
+		tr/אהגיטכךלןמעצפשüûÿ/aaaeeeeiiiooouuuy/;
+		next if (/[^a-z]/i);
+		push @wordlist, uc;
+	}
+	close($fd) or die($!);
+
+	@wordlist = part {length} @wordlist;
+
+	my $patched;
+	# Try to patch the key as long as we can
+	do {
+		my $decyphered_text = decypher_text($input_text, $key);
+		print "Current key: $key\n";
+		#print "Current decyphered text with key $key:\n$decyphered_text\n";
+		my %index_word = split_text($decyphered_text);
+
+		$patched = 0;
+		# We want to patch the longest words first
+		my @sorted_keys = sort {length $index_word{$b} <=> length $index_word{$a}} (keys %index_word);
+
+		foreach my $offset (@sorted_keys) {
+
+			my $word_to_correct = uc $index_word{$offset};
+			my ($value, @candidates) = close_words($word_to_correct, $wordlist[length($word_to_correct)]);
+
+			#print "$word_to_correct could be replaced with score $value by ".(join ", ", @candidates)."\n";
+
+			# We need there is only one candidate to do the replacement
+			next if (@candidates != 1);
+
+			my $new_word = $candidates[0];
+
+			# 55% match needed
+			next if ($value < (length $word_to_correct) * 0.55);
+
+			# Nothing to correct in case of complete match
+			next if ($value == length($word_to_correct));
+
+			print "replacing $word_to_correct with $new_word\n";
+			my $newkey = patch_key($offset, $word_to_correct, $new_word, $key);
+			if ($subst{"$key|$newkey"}) {
+				warn "The key has already changed from $key to $newkey in the past\n";
+				warn "Replacement loop detected, stopping wordlist remplacements\n";
+				$patched = 0; # This should already be the case, but does not cost much.
+				last;
+			}
+
+			$subst{"$key|$newkey"} = 1;
+			$key = $newkey;
+			$patched = 1;
+			last;
+		}
+	} while ($patched);
+
+	return $key;
+}
+
+
+
+# From two strings including the same number of alpha chars,
+# keep every alpha chars from the first string, and all the non-alpha chars from the second string.
+sub update_nonalpha {
+	my @alpha = split //, normalize_text(shift);
+	my @non_alpha = split //, shift;
+	my @res = @non_alpha;
+
+	my $alpha_idx = 0;
+	foreach (@res) {
+		# This updates @res
+		$_ = $alpha[$alpha_idx++] if (/[a-zA-Z]/i);
+	}
+
+	return (join '', @res);
+}
+
+
+
+sub netbeans_vim {
+	my $key = shift;
+	my $original_text = shift;
+	my $text = decypher_text($original_text, $key);
+	my $nb = Vim::Netbeans->new();
+	my $text_letter_count = letter_count($text);
+
+
+	# Wait for a connection
+	$nb->accept();
+
+	# Create a buffer
+	my $buf = $nb->create();
+
+	# Insert the decyphered text
+	$buf->insert(0, $text);
+
+	# Prepare the precious to insert
+	my $precious_text = "# Do not remove these lines while using unvigenere\n";
+	$precious_text .= "key: ";
+	my $precious_key_off = length($precious_text);
+
+	$precious_text .= $key."\n";
+	$precious_text .= "# End of precious lines\n";
+
+	my $precious_len = length($precious_text);
+
+	# Prepend the precious text
+	$buf->insert(0, $precious_text);
+
+	# We're done with the initial insert
+	$buf->insertDone();
+
+	# The (precious) first lines are not modifiable
+	$buf->guard(0, $precious_len);
+
+	# $vimtext is the $text as in the vim instance
+	my $vimtext = $text;
+
+	# This exists as subref only for closures on $vimtext, $text, $key
+	# All these variables are read and modified
+	my $update = sub {
+		# Noramlize to diff the decyphered text and the vim's text
+		my @norm_vimtext = split //, normalize_text($vimtext);
+		my @norm_text = split //, normalize_text($text);
+
+		my $opp_key = opposed_key($key);
+
+		# Get the index of the letters changed
+		my @diff = grep { $norm_vimtext[$_] ne $norm_text[$_] } (keys @norm_text);
+
+		# Compute the new key according to the changed text
+		foreach (@diff) {
+			$key = patch_key($_, $norm_text[$_], $norm_vimtext[$_], $key);
+			#print "new key: $key\n";
+		}
+
+		# Keep the alpha chars from $text and the non-alpha from $vimtext in
+		# order to keep the wanted text-formatting
+		$text = update_nonalpha($text, $vimtext);
+
+		# Do not update anything if there is nothing to update
+		# (And hopefully avoid most of the race conditions)
+		return if (!@diff);
+
+		# Decypher with the new key
+		$original_text = decypher_text($text, $opp_key);
+		$text = decypher_text($original_text, $key);
+
+
+		my (undef, undef, undef, $dotoff) = $nb->getCursor();
+		$buf->startAtomic();
+
+		# Update the key inside the precious lines
+		$buf->remove($precious_key_off, length($key));
+		$buf->insert($precious_key_off, $key);
+
+		# Replace one line at time since vim don't allow me to replace one character at time
+		my @lines = split /\n/, $text;
+		my $off = $precious_len;
+
+		foreach (@lines) {
+			$buf->remove($off, length($_) + 1);
+			$buf->insert($off, $_."\n");
+			$off += length($_) + 1;
+		}
+
+		$vimtext = $text;
+
+		$buf->setDot($dotoff);
+		$buf->endAtomic();
+	};
+
+	my $oninsert = sub {
+		my (undef, undef, undef, $off, $newtext) = @_;
+
+		$off -= $precious_len;
+		substr($vimtext, $off, 0, $newtext);
+
+		$update->() if (letter_count($newtext) > 0 && letter_count($vimtext) == $text_letter_count);
+	};
+
+	my $onremove = sub {
+		my (undef, undef, undef, $off, $len) = @_;
+		$off -= $precious_len;
+		my $oldtext = substr($vimtext, $off, $len, '');
+
+		# Has changed the number of text character?
+		# If so, we may update the key
+		$update->() if (letter_count($oldtext) > 0 && letter_count($vimtext) == $text_letter_count);
+	};
+
+	$buf->register('insert', $oninsert);
+	$buf->register('remove', $onremove);
+
+	# Now the user can edit the text
+	$buf->initDone();
+	$nb->run();
+
+	return [$key, $text];
+}
+
+
+
+sub shorten_key {
+	my $key = shift;
+	my @f = factors(length($key));
+
+	foreach (@f) {
+		my @chunks = ($key =~ /(.{$_})/g);
+		return $chunks[0] if (all {$_ eq $chunks[0]} @chunks);
+	}
+
+	die("shorten_key: foreach loop should not exit");
+}
+
+
+
+
+sub help {
+	my $ret = shift;
+
+	print "usage: $0 [options]\n";
+	print "\n";
+	print "valid options are:\n";
+	print "    --input\n";
+	print "    --input-file\n";
+	print "    -i file                        File to use as input. (default stdin)\n";
+	print "    --use-coincidence-index\n";
+	print "    --use-coincidence\n";
+	print "    --use-ci                       Use the coincidence index to compute the key calculation (this is the default).\n";
+	print "    --coincidence-index-max-length\n";
+	print "    --ci-max-len                   Maximum length of the key searched by the coincidence index method (default 10).\n";
+	print "    --show-coincidence-index\n";
+	print "    --show-coincidence\n";
+	print "    --show-ci                      Show the computed coincidence indexes for the different lengths\n";
+	print "    --coincidence-index-language\n";
+	print "    --ci-lang\n";
+	print "    --lang                         Use the given language to select the target coincidence index (default english)\n";
+	print "    --help\n";
+	print "    -h\n";
+	print "    -?                             Print this help\n";
+
+	exit $ret;
+}
+
+
+
+sub main {
+	my $input_file = '-';
+	my $output_file = '-';
+	my $input_text;
+	my $wordlist_file;
+	my $use_ci = 1;
+	my $show_ci = 0;
+	my $ci_max_len = 10;
+	my $ci_threshord = 0.05;
+	my $use_km = 1;
+	my $show_km = 0;
+	my $km_min_length = 3;
+	my $lang = 'english';
+	my $target_index;
+	my $key_length;
+	my @ci_key_length;
+	my @km_key_length;
+	my @global_key_length;
+	my $key;
+	my $decyphered_text;
+
+
+	my %ci;
+	my %km;
+
+
+	Getopt::Long::Configure('gnu_getopt', 'auto_help');
+
+	my $success = GetOptions(
+		'input|input-file|i=s'                             => \$input_file,
+		'output|output-file|o=s'                           => \$output_file,
+		'frequency-language|freq-lang|lang=s'              => \$lang,
+		'wordlist|w=s'                                     => \$wordlist_file,
+		'use-coincidence-index|use-coincidence|use-ci!'    => \$use_ci,
+		'show-coincidence-index|show-coincidence|show-ci!' => \$show_ci,
+		'coincidence-index-max-length|ci-max-length=i'     => \$ci_max_len,
+		'target-coincidence-index|target-ci|ci=f'          => \$target_index,
+		'use-kasiski-match|kasiski|km!'                    => \$use_km,
+		'show-kasiski-matches|show-kasiski|show-km!'       => \$show_km,
+		'kasiski-match-min-length|km-min-length=i'         => \$km_min_length,
+		'key-length|length|l=i'                            => \$key_length,
+		'help|h|?'                                         => sub { help(0) }
+	);
+
+	help(1) if (!$success);
+
+	# Get the target coincidence index
+	die 'Supported languages are '.(join ', ', keys %lang_freq)."\n" if (!exists $lang_freq{$lang});
+
+
+	if (defined $key_length && $use_ci) {
+		warn "Using coincidence index is only useful if the key length is unknown. Disabling coincidence index\n";
+		$use_ci = 0;
+	}
+
+
+	if (defined $key_length && $use_km) {
+		warn "Using kasiski match is only useful if the key length is unknown. Disabling kasiski match\n";
+		$use_km = 0;
+	}
+
+
+	# Read the text
+	if ($input_file eq '-') {
+		$input_text = do {local $/; <STDIN>};
+	} else {
+		open(my $fd, '<', $input_file) or die($!);
+		$input_text = do {local $/; <$fd>};
+		close($fd) or die($!);
+	}
+
+	$input_text =~ s/\r\n/\n/g;
+
+	# Compute the coincidence index if needed
+	if ($use_ci || $show_ci) {
+		%ci = compute_ci($input_text, $ci_max_len);
+	}
+
+	if ($show_ci) {
+		print "Detailed coincidence index:\n";
+		foreach my $len (sort {$a <=> $b} keys %ci) {
+			print "length: $len\n";
+			foreach (@{$ci{$len}}) {
+				print "\t$_\n";
+			}
+		}
+	}
+
+
+	# Search for the key length
+	if ($use_ci) {
+		# Compute the avg ci for each possible length
+		my %avg = map {$_ => avg(@{$ci{$_}})} (keys %ci);
+
+		# Sort keys by average value
+		my @sorted_keys = sort {$avg{$b} <=> $avg{$a}} keys %avg;
+		@ci_key_length = grep {$avg{$_} >= $ci_threshord} @sorted_keys;
+
+		if ($show_ci) {
+			print "coincidence index summarized:\n";
+			foreach (@sorted_keys) {
+				print color 'bold' if ($avg{$_} >= $ci_threshord);
+				print "length $_: ".$avg{$_};
+				print color 'reset' if ($avg{$_} >= $ci_threshord);
+				print "\n";
+			}
+		}
+
+		print "Probable key length using coincidence index: ".(join ", ", @ci_key_length)."\n";
+		@global_key_length = @ci_key_length;
+	}
+
+
+	if ($use_km || $show_km) {
+		%km = compute_km($input_text, $km_min_length);
+	}
+
+	if ($show_km) {
+		# TODO
+	}
+
+	if ($use_km) {
+		my @sorted_keys = sort {$km{$b} <=> $km{$a}} keys %km;
+		@km_key_length = grep {$km{$_} >= $km{1} / 3} @sorted_keys;
+
+		# Key length 1 is not interresting
+		shift @km_key_length;
+
+		if ($show_km) {
+			print "kasiski matches:\n";
+			foreach (@sorted_keys) {
+				print "length $_: ".$km{$_}."\n";
+			}
+		}
+
+		print "Probable key length using kasiski match: ".(join ", ", @km_key_length)."\n";
+		@global_key_length = @km_key_length;
+	}
+
+	if ($use_ci && $use_km) {
+		@global_key_length = grep { $_ ~~ @km_key_length } @ci_key_length;
+		print "Probable key length globally: ".(join ", ", @global_key_length)."\n";
+	}
+
+	if ($use_ci || $use_km) {
+		$key_length = $global_key_length[0];
+		print "Trying key length $key_length\n";
+		print "If it doesn't work, try another with --key-length $global_key_length[1] or so...\n";
+	}
+
+
+	# Get a first key by multiple frequency analysis
+	$key = multi_freq($input_text, $key_length, $lang);
+
+	#print "Key found without worldlist: $key\n";
+	$decyphered_text = decypher_text($input_text, $key);
+
+	if ($wordlist_file) {
+		$key = patch_key_wordlist($input_text, $key, $wordlist_file);
+	}
+
+	$decyphered_text = decypher_text($input_text, $key);
+
+	my $thr = async {netbeans_vim($key, $input_text)};
+
+	system("gvim", "--nofork", "-nb", "-c", "au BufNew * setlocal buftype=nofile | setlocal bufhidden=hide | setlocal noswapfile");
+
+	($key, $decyphered_text) = @{$thr->join()};
+
+
+	# Cut the key if it is repeated
+	my $shortkey = shorten_key($key);
+
+	if (length($shortkey) < length($key)) {
+		print "The key found $key is actually $shortkey repeated ";
+		print length($key) / length($shortkey);
+		print " times\n";
+		$key = $shortkey;
+	}
+
+	print "Final key: $key\n";
+	print "Opposed key: ", opposed_key($key), "\n";
+
+	# Write the text
+	if ($output_file eq '-') {
+		print $decyphered_text;
+	} else {
+		open(my $fd, '<', $output_file) or die($!);
+		print $fd $decyphered_text;
+		close($fd) or die($!);
+	}
+
+}
+
+
+
+main();
