@@ -1,0 +1,244 @@
+#!/usr/bin/python
+
+import fileinput
+from math import sqrt
+
+
+charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+charset_num = {charset[i] : i for i in range(0, len(charset))}
+
+english_freq = {
+    'A' : 0.0808, 'B' : 0.0167, 'C' : 0.0318, 'D' : 0.0399, 'E' : 0.1256,
+    'F' : 0.0217, 'G' : 0.0180, 'H' : 0.0527, 'I' : 0.0724, 'J' : 0.0014,
+    'K' : 0.0063, 'L' : 0.0404, 'M' : 0.0260, 'N' : 0.0738, 'O' : 0.0747,
+    'P' : 0.0191, 'Q' : 0.0009, 'R' : 0.0642, 'S' : 0.0659, 'T' : 0.0915,
+    'U' : 0.0279, 'V' : 0.0100, 'W' : 0.0189, 'X' : 0.0021, 'Y' : 0.0165,
+    'Z' : 0.0007
+}
+
+english_freq_num = {charset_num[k] : v for (k, v) in english_freq.items()}
+
+
+def str_to_num(s):
+    return [charset_num[c] for c in s]
+
+
+
+def num_to_str(t):
+    return ''.join([charset[i] for i in t])
+
+
+
+def autokey_cipher(s, k):
+    kpad = k + s
+    kpad = kpad[:len(s)]
+    snum = str_to_num(s)
+    kpadnum = str_to_num(kpad)
+
+    cnum = [(a + b) % len(charset) for (a, b) in zip(snum, kpadnum)]
+    c = num_to_str(cnum)
+
+    return c
+
+
+
+def autokey_decipher(c, k):
+    cnum = str_to_num(c)
+    knum = str_to_num(k)
+
+    # Decode the part of the string that has been ciphered with the key
+    snum = [(a - b) % len(charset) for (a, b) in zip(cnum, knum)]
+
+    # Decode the rest of the string
+    for i in range(len(k), len(c)):
+        snum.append(cnum[i] - snum[i - len(k)] % len(charset))
+
+    s = num_to_str(snum)
+    return s
+
+
+
+def count_to_freq(cnt):
+    total = 0
+    for v in cnt.values():
+        total += v
+
+    total = float(total)
+
+    frq = {}
+    for (k, v) in cnt.items():
+        frq[k] = v / total
+
+    return frq
+
+
+
+def freq_to_ic(frq):
+    ic = 0
+    for f in frq.values():
+        ic += f**2
+
+    return ic
+
+
+
+def count_to_ic(cnt):
+    total = 0
+    for (k, v) in cnt.items():
+        total += v
+
+    total = float(total)
+
+    ic = 0
+    for (k, v) in cnt.items():
+        ic += (v * (v - 1)) / (total * (total - 1))
+
+    return ic
+
+
+
+def count_for_length_offset(s, l, o):
+    cntp = {n : 0 for n in range(0, len(charset))}
+    cntn = {n : 0 for n in range(0, len(charset))}
+    p = 0
+    parity = 1
+
+    for c in s[o::l]:
+        p = (c - p) % len(charset)
+
+        if parity > 0:
+            cntp[p] += 1
+        else:
+            cntn[p] += 1
+
+        parity = -parity
+
+    return (cntp, cntn)
+
+
+
+def ic_for_length_offset(s, l, o):
+    (cntp, cntn) = count_for_length_offset(s, l, o)
+
+    icp = count_to_ic(cntp)
+    icn = count_to_ic(cntn)
+
+    return (icp, icn)
+
+
+
+def ic_for_length(s, l):
+    ic = []
+    for i in range(0, l):
+        ic.append(ic_for_length_offset(s, l, i))
+
+    return ic
+
+
+
+def key_length(s):
+    t = str_to_num(s)
+
+    ic = {}
+    for i in range(1, len(t) / 6):
+        ic[i] = ic_for_length(t, i)
+
+    # Compute some metric for each set of index of coincidence
+    icflat = {k : list(sum(v, ())) for (k, v) in ic.items()}
+    metric = {k : sum(v) / len(v) for (k, v) in icflat.items()}
+    prefered_length = metric.keys()
+    prefered_length.sort(reverse = True, key = lambda k: metric[k])
+
+    return prefered_length[0]
+
+
+
+def shift_add_freq(frqp, frqn, n):
+    return {k : (frqp[(k + n) % len(charset)] + frqn[(k - n) % len(charset)]) / 2 for k in charset_num.values()}
+
+
+
+def distfreq(frq1, frq2):
+    s = 0.
+
+    for k in frq1.keys():
+        s += frq1[k] * frq2[k]
+
+    return s
+
+
+def key_char_compute(c, n, o):
+    (cntp, cntn) = count_for_length_offset(c, n, o)
+    freqp = count_to_freq(cntp)
+    freqn = count_to_freq(cntn)
+
+    dist = {}
+    for k in charset_num.values():
+        freq_shift = shift_add_freq(freqp, freqn, k)
+        dist[k] = distfreq(freq_shift, english_freq_num)
+
+    prefered_char = dist.keys()
+    prefered_char.sort(reverse = True, key = lambda k: dist[k])
+
+    return prefered_char[0]
+
+
+
+def key_compute(c, n):
+    cnum = str_to_num(c)
+    key = [key_char_compute(cnum, n, i) for i in range(0, n)]
+
+    return num_to_str(key)
+
+
+
+def preprocess(s):
+    out = ''
+    for c in s:
+        if c.isalpha():
+            out += c
+
+    return out.upper()
+
+
+def postprocess(template, data):
+    out = ''
+    it = iter(data)
+    for c in template:
+        if not c.isalpha():
+            out += c
+            continue
+
+        if c.isupper():
+            out += it.next()
+        else:
+            out += it.next().lower()
+
+    return out
+
+
+def crack(data):
+    l = key_length(data)
+    print "Key length: " + str(l)
+    key = key_compute(data, l)
+    print "The key is: " + key
+    return autokey_decipher(data, key)
+
+
+def main():
+    datain = ''
+    for line in fileinput.input():
+        datain += line
+
+    data = preprocess(datain)
+
+    data = crack(data)
+    #data = autokey_cipher(data, preprocess("This is the key"))
+    #data = autokey_decipher(data, preprocess("This is the key"))
+
+    dataout = postprocess(datain, data)
+    print dataout
+
+
+if __name__ == '__main__':
+    main()
