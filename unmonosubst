@@ -1,0 +1,147 @@
+#!/usr/bin/python
+
+
+# TODO : implement a probable know word
+
+import string
+import fileinput
+
+
+charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+english_freq = {
+    'A' : 0.0808, 'B' : 0.0167, 'C' : 0.0318, 'D' : 0.0399, 'E' : 0.1256,
+    'F' : 0.0217, 'G' : 0.0180, 'H' : 0.0527, 'I' : 0.0724, 'J' : 0.0014,
+    'K' : 0.0063, 'L' : 0.0404, 'M' : 0.0260, 'N' : 0.0738, 'O' : 0.0747,
+    'P' : 0.0191, 'Q' : 0.0009, 'R' : 0.0642, 'S' : 0.0659, 'T' : 0.0915,
+    'U' : 0.0279, 'V' : 0.0100, 'W' : 0.0189, 'X' : 0.0021, 'Y' : 0.0165,
+    'Z' : 0.0007
+}
+
+
+
+french_freq = {
+    'A' : 0.0920, 'B' : 0.0102, 'C' : 0.0264, 'D' : 0.0339, 'E' : 0.1587,
+    'F' : 0.0095, 'G' : 0.0104, 'H' : 0.0077, 'I' : 0.0841, 'J' : 0.0089,
+    'K' : 0.0000, 'L' : 0.0534, 'M' : 0.0324, 'N' : 0.0715, 'O' : 0.0514,
+    'P' : 0.0286, 'Q' : 0.0106, 'R' : 0.0646, 'S' : 0.0790, 'T' : 0.0726,
+    'U' : 0.0624, 'V' : 0.0215, 'W' : 0.0000, 'X' : 0.0030, 'Y' : 0.0024,
+    'Z' : 0.0032
+}
+
+
+
+
+
+def monoalpha_cipher(s, k):
+    # Build the hash for easy lookup
+    subst = {a : b for (a, b) in zip(charset, k)}
+
+    c = [subst[a] for a in s]
+    cstr = ''.join(c)
+
+    return cstr
+
+
+
+def monoalpha_decipher(c, k):
+    # Build the hash for easy lookup
+    subst = {a : b for (a, b) in zip(k, charset)}
+
+    c = [subst[a] for a in c]
+    cstr = ''.join(c)
+
+    return cstr
+
+
+
+def count_chars(s):
+    cnt = {c : 0 for c in charset}
+
+    for c in s:
+        cnt[c] += 1
+
+    return cnt
+
+
+
+def count_to_freq(cnt):
+    total = float(sum(cnt.values()))
+
+    frq = {}
+    for (k, v) in cnt.items():
+        frq[k] = v / total
+
+    return frq
+
+
+
+def key_compute(c):
+    cnt = count_chars(c)
+    frq = count_to_freq(cnt)
+
+    cipher_order = frq.keys()
+    cipher_order.sort(reverse = True, key = frq.get)
+
+    french_order = french_freq.keys()
+    french_order.sort(reverse = True, key = french_freq.get)
+
+    print cipher_order
+    print french_order
+
+    subst = {a : b for (a, b) in zip(french_order, cipher_order)}
+
+    key = ''
+    for e in charset:
+        key += subst[e]
+
+    return key
+
+
+
+def preprocess(s):
+    out = ''
+    for c in s:
+        if c.isalpha():
+            out += c
+
+    return out.upper()
+
+
+def postprocess(template, data):
+    out = ''
+    it = iter(data)
+    for c in template:
+        if not c.isalpha():
+            out += c
+            continue
+
+        if c.isupper():
+            out += it.next()
+        else:
+            out += it.next().lower()
+
+    return out
+
+
+def crack(data):
+    key = key_compute(data)
+    print "The key is: " + key
+    return monoalpha_decipher(data, key)
+
+
+def main():
+    datain = ''
+    for line in fileinput.input():
+        datain += line
+
+    data = preprocess(datain)
+
+    data = crack(data)
+
+    dataout = postprocess(datain, data)
+    print dataout
+
+
+if __name__ == '__main__':
+    main()
