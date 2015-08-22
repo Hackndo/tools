@@ -1,0 +1,80 @@
+Required libraries
+==================
+openssl
+
+How to compile?
+===============
+$ make
+
+What's this tool?
+=================
+This is an implementation of the "length extension attack" for sha1.
+https://en.wikipedia.org/wiki/Length_extension_attack
+
+From a given sha1 hash of some unknown data, it creates a new sha1 hash of that
+unknown data concatenated with a string of your choice. You don't know what
+$prefix is, but you know sha1($prefix) and you want the result of
+sha1($prefix.$something).
+
+For instance, a bad implementation of a Hash-based Message Authentication Code
+(MAC) can be exploited with this. A shared secret key $secret is used to salt a
+sha1. The data is signed with sha1($salt.$data), and only the hash and $data is
+transmitted. The receiver can check the message has not been modified by
+recomputing the hash with the same secret salt.
+
+With this tool you can append some data and compute the resulting sha1 hash. You
+give it sha1($salt.$data) and it computes sha1($salt.$data.$appendeddata).
+
+Unfortunately, it's not that simple. When a sha1 function terminates, it appends
+some padding that includes the size in bits of the data. It's the Merkle-Damgård
+construction). So in order to append some data, we have to first append the same
+padding as the sha1 function did. Since the padding the sha1 function appended
+to construct the hash you know depends on the length of the unknown data, you'll
+have to either know this length, or try them all.
+
+So this tool will output the padding and your data to append in addition to the
+new hash. See the next section for the output format.
+
+
+How to use it?
+==============
+$ ./sha1appender sha1ofunknowndata postfixdatainhex [[minlength] maxlength]
+
+Example
+-------
+$ ./sha1appender 0159c73428725dfed59f0c6fed7f0a7940f28388 68656c6c6f776f726c64
+0: 66e6b39bb3f90f069abe24eb6ae8d7f7caf7533c \x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x68\x65\x6c\x6c\x6f\x77\x6f\x72\x6c\x64
+1: 66e6b39bb3f90f069abe24eb6ae8d7f7caf7533c \x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x08\x68\x65\x6c\x6c\x6f\x77\x6f\x72\x6c\x64
+2: 66e6b39bb3f90f069abe24eb6ae8d7f7caf7533c \x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x68\x65\x6c\x6c\x6f\x77\x6f\x72\x6c\x64
+...
+
+Input
+-----
+0159c73428725dfed59f0c6fed7f0a7940f28388 is the has of some unknown prefix data
+(actually it's litterally "unknowndata").
+68656c6c6f776f726c64 is the postfix data encoded in hex. In this case it's
+"helloworld". It is encoded in hex to allow you to input some nul bytes.
+
+Output
+------
+The output is made of 3 fields.
+1) The data length in byte assumed. See above why it's important.
+2) The sha1 hash of the unknown data with your data appended.
+3) The padding data with your own data at the end encoded in hex with \x prefix.
+
+In reality, you'll have to try all the paddings until the correct one is found.
+But here, as we know the initial data length is 11, we can skip to the output
+line starting with "11:" and just check it works correctly.
+
+11: 66e6b39bb3f90f069abe24eb6ae8d7f7caf7533c \x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x58\x68\x65\x6c\x6c\x6f\x77\x6f\x72\x6c\x64
+
+$ echo -n "unknowndata\x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x58\x68\x65\x6c\x6c\x6f\x77\x6f\x72\x6c\x64" | sha1sum
+66e6b39bb3f90f069abe24eb6ae8d7f7caf7533c  -
+
+The result of the sha1sum command is hash predicted by sha1appender while it
+didn't know about "unknowndata".
+
+Additionally, some bounds on the data length can be given. If a single
+additional argument is given it's the maximal data length for which the padding
+is generated. If two are given, they're the minimum length and the maximum
+length.
