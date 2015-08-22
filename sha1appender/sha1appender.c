@@ -21,54 +21,13 @@ void printhashnl(unsigned char *md) {
 
 
 
-int main(int argc, char **argv) {
-	const char *prefixhash;
-	char *append;
-	size_t appendlen;
-	size_t minlen, maxlen;
+void sha1append(const char *prefixhash, const char *append, size_t appendlen,
+		size_t minlen, size_t maxlen) {
+
 	SHA_CTX ctx;
 	unsigned char md[SHA_DIGEST_LENGTH];
 	size_t i;
 	uint64_t datasize;
-
-	if (argc < 3 || argc > 5) {
-		fprintf(stderr, "usage: %s sha1(prefix) hex(append) [[minlen] maxlen]\n", argv[0]);
-		return EXIT_FAILURE;
-	}
-
-	prefixhash = argv[1];
-	append = argv[2];
-
-	if (argc == 3) {
-		minlen = 0;
-		maxlen = SHA_CBLOCK;
-	} else if (argc == 4) {
-		minlen = 0;
-		maxlen = strtol(argv[3], NULL, 0);
-	} else if (argc == 5) {
-		minlen = strtol(argv[3], NULL, 0);
-		maxlen = strtol(argv[4], NULL, 0);
-	}
-
-	if (strlen(prefixhash) != 2 * SHA_DIGEST_LENGTH) {
-		fprintf(stderr, "sha1(prefix) must be 40 hex chars\n");
-		return EXIT_FAILURE;
-	}
-
-	appendlen = strlen(append);
-
-	if (appendlen % 2 != 0) {
-		fprintf(stderr, "hex(append) must have an even length\n");
-		return EXIT_FAILURE;
-	}
-
-	/* Decode the hex of append */
-	appendlen /= 2;
-	for (i = 0; i < appendlen; i++) {
-		unsigned x;
-		sscanf(&append[2 * i], "%02x", &x);
-		append[i] = x;
-	}
 
 
 	/* Prepare (part of) the SHA context */
@@ -116,7 +75,57 @@ int main(int argc, char **argv) {
 			printf("\\x%02x", append[i]);
 		printf("\n");
 	}
+}
 
+
+
+int main(int argc, char **argv) {
+	const char *prefixhash;
+	char *append;
+	size_t appendlen;
+	size_t minlen, maxlen;
+	size_t i;
+
+	if (argc < 3 || argc > 5) {
+		fprintf(stderr, "usage: %s sha1(prefix) hex(append) [[minlen] maxlen]\n", argv[0]);
+		return EXIT_FAILURE;
+	}
+
+	prefixhash = argv[1];
+	append = argv[2];
+
+	if (argc == 3) {
+		minlen = 0;
+		maxlen = SHA_CBLOCK;
+	} else if (argc == 4) {
+		minlen = 0;
+		maxlen = strtol(argv[3], NULL, 0);
+	} else if (argc == 5) {
+		minlen = strtol(argv[3], NULL, 0);
+		maxlen = strtol(argv[4], NULL, 0);
+	}
+
+	if (strlen(prefixhash) != 2 * SHA_DIGEST_LENGTH) {
+		fprintf(stderr, "sha1(prefix) must be 40 hex chars\n");
+		return EXIT_FAILURE;
+	}
+
+	appendlen = strlen(append);
+
+	if (appendlen % 2 != 0) {
+		fprintf(stderr, "hex(append) must have an even length\n");
+		return EXIT_FAILURE;
+	}
+
+	/* Decode the hex of append */
+	appendlen /= 2;
+	for (i = 0; i < appendlen; i++) {
+		unsigned x;
+		sscanf(&append[2 * i], "%02x", &x);
+		append[i] = x;
+	}
+
+	sha1append(prefixhash, append, appendlen, minlen, maxlen);
 
 	return EXIT_SUCCESS;
 }
