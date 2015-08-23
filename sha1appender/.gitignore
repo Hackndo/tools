@@ -1,2 +1,4 @@
 sha1appender
 sha1appender.o
+getopthelp.o
+misc.o

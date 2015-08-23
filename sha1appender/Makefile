@@ -4,7 +4,7 @@ CFLAGS=-Wall -Wextra -O2
 LDFLAGS=
 LIBS=-lssl -lcrypto
 
-SRCS=sha1appender.c
+SRCS=sha1appender.c misc.c getopthelp.c
 OBJS=$(subst .c,.o,$(SRCS))
 BIN=sha1appender
 

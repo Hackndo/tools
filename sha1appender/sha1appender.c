@@ -4,6 +4,17 @@
 #include <stdint.h>
 #include <openssl/sha.h>
 
+#include "getopthelp.h"
+#include "misc.h"
+
+
+
+
+static struct goh_option opt_desc[] = {
+	{"min-length", 'm', GOH_ARG_REQUIRED, 'm', "Minimum data length tried."},
+	{"max-length", 'M', GOH_ARG_REQUIRED, 'M', "Maximum data length tried."}
+};
+
 
 
 void printhash(unsigned char *md) {
@@ -80,42 +91,56 @@ void sha1append(const char *prefixhash, const char *append, size_t appendlen,
 
 
 int main(int argc, char **argv) {
+	struct goh_state st;
+	int opt;
 	const char *prefixhash;
 	char *append;
 	size_t appendlen;
-	size_t minlen, maxlen;
+	size_t minlen = 0, maxlen = SHA_CBLOCK;
 	size_t i;
 
-	if (argc < 3 || argc > 5) {
-		fprintf(stderr, "usage: %s sha1(prefix) hex(append) [[minlen] maxlen]\n", argv[0]);
+
+	/* Options parsing */
+	goh_init(&st, opt_desc, ARRAY_LENGTH(opt_desc), argc, argv, 1);
+	st.usagehelp = "[options] sha1(prefix) hex(append)\n";
+
+	while ((opt = goh_nextoption(&st)) >= 0) {
+		switch (opt) {
+		case 'm':
+			minlen = strtol(st.argval, NULL, 0);
+			break;
+
+		case 'M':
+			maxlen = strtol(st.argval, NULL, 0);
+			break;
+
+		default:
+			custom_error("Option declared but not handled");
+		}
+	}
+
+	/* Common command line error */
+	if (st.argidx + 2 != argc) {
+		custom_warn("Missing mandatory arguments");
+		goh_printhelp(&st, stderr);
 		return EXIT_FAILURE;
 	}
 
-	prefixhash = argv[1];
-	append = argv[2];
+	prefixhash = argv[st.argidx];
+	append = argv[st.argidx + 1];
 
-	if (argc == 3) {
-		minlen = 0;
-		maxlen = SHA_CBLOCK;
-	} else if (argc == 4) {
-		minlen = 0;
-		maxlen = strtol(argv[3], NULL, 0);
-	} else if (argc == 5) {
-		minlen = strtol(argv[3], NULL, 0);
-		maxlen = strtol(argv[4], NULL, 0);
-	}
+	goh_fini(&st);
 
-	if (strlen(prefixhash) != 2 * SHA_DIGEST_LENGTH) {
-		fprintf(stderr, "sha1(prefix) must be 40 hex chars\n");
-		return EXIT_FAILURE;
-	}
+
+	/* Command line checking and conversion */
+
+	if (strlen(prefixhash) != 2 * SHA_DIGEST_LENGTH)
+		custom_error("sha1(prefix) must be %d hex characters long", 2 * SHA_DIGEST_LENGTH);
 
 	appendlen = strlen(append);
 
-	if (appendlen % 2 != 0) {
-		fprintf(stderr, "hex(append) must have an even length\n");
-		return EXIT_FAILURE;
-	}
+	if (appendlen % 2 != 0)
+		custom_error("hex(append) must have an even length");
 
 	/* Decode the hex of append */
 	appendlen /= 2;
