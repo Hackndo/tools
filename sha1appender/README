@@ -27,7 +27,7 @@ give it sha1($salt.$data) and it computes sha1($salt.$data.$appendeddata).
 
 Unfortunately, it's not that simple. When a sha1 function terminates, it appends
 some padding that includes the size in bits of the data. It's the Merkle-Damgård
-construction). So in order to append some data, we have to first append the same
+construction. So in order to append some data, we have to first append the same
 padding as the sha1 function did. Since the padding the sha1 function appended
 to construct the hash you know depends on the length of the unknown data, you'll
 have to either know this length, or try them all.
@@ -51,7 +51,7 @@ $ ./sha1appender 0159c73428725dfed59f0c6fed7f0a7940f28388 helloworld
 
 Input
 -----
-0159c73428725dfed59f0c6fed7f0a7940f28388 is the has of some unknown prefix data
+0159c73428725dfed59f0c6fed7f0a7940f28388 is the hash of some unknown prefix data
 (actually it's litterally "unknowndata").
 "helloworld" is the postfix data that are to be appended to the data that
 generated the previous hash.
@@ -78,8 +78,8 @@ didn't know about "unknowndata".
 Options
 -------
 Additionally, some bounds on the data length can be given. The option
---min-length is given, the data length tried start with this value, the default
-is 0. The option --max-length states the maximal data length, the default is 64.
+--min-length is given, the data length tried starts with this value, default
+is 0. The option --max-length states the maximal data length, default is 64.
 
 --append-decode can be given to state how to decode the postfix data. 3 valid
 values are defined for this option.
