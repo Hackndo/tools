@@ -53,23 +53,22 @@ size_t decode_append(char *append, enum decode appenddecode) {
 	if (appenddecode == DECODE_RAW)
 		return inlen;
 
-	/* Hex decoding "4142" is "AB" */
-	if (appenddecode == DECODE_HEX) {
-		if (inlen % 2 != 0)
-			custom_error("hex(append) must have an even length");
+	/* Additional requirement for DECODE_HEX */
+	if (appenddecode == DECODE_HEX && inlen % 2 != 0)
+		custom_error("The append string must have an even length to hex-decode it.");
 
-		inlen /= 2;
-		for (i = 0; i < inlen; i++) {
-			sscanf(&append[2 * i], "%02x", &x);
-			append[i] = x;
-		}
-
-		return inlen;
-	}
-
-	/* DECODE_ECHO */
 	for (i = 0, o = 0; i < inlen; o++) {
-		int n;
+		int n = 0;
+
+		/* Special case for DECODE_HEX */
+		if (appenddecode == DECODE_HEX) {
+			sscanf(&append[i], "%02x%n", &x, &n);
+			if (n != 2)
+				custom_error("Error while hex-decoding %s", &append[i]);
+			append[o] = x;
+			i += 2;
+			continue;
+		}
 
 		if (append[i] != '\\') {
 			append[o] = append[i];
