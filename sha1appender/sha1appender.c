@@ -9,14 +9,21 @@
 
 
 
+enum decode {
+	DECODE_RAW,
+	DECODE_HEX,
+	DECODE_ECHO
+};
+
+
 
 static struct goh_option opt_desc[] = {
 	{"min-length", 'm', GOH_ARG_REQUIRED, 'm',
 		"Minimum data length tried."},
 	{"max-length", 'M', GOH_ARG_REQUIRED, 'M',
 		"Maximum data length tried."},
-	{"append-hex", 'x', GOH_ARG_REFUSED, 'x',
-		"The string to append is given in hexadecimal."},
+	{"append-decode", 'd', GOH_ARG_REQUIRED, 'd',
+		"How the append string is decoded. Valid values are raw, hex and echo (the default)."}
 };
 
 
@@ -35,18 +42,97 @@ void printhashnl(unsigned char *md) {
 }
 
 
-void decode_append(char *append, size_t *appendlen, int appendhex) {
-	size_t i;
+
+size_t decode_append(char *append, enum decode appenddecode) {
+	size_t inlen;
+	size_t i, o;
+	unsigned x;
+
+	inlen = strlen(append);
+
+	if (appenddecode == DECODE_RAW)
+		return inlen;
 
 	/* Hex decoding "4142" is "AB" */
-	if (appendhex) {
-		*appendlen /= 2;
-		for (i = 0; i < *appendlen; i++) {
-			unsigned x;
+	if (appenddecode == DECODE_HEX) {
+		if (inlen % 2 != 0)
+			custom_error("hex(append) must have an even length");
+
+		inlen /= 2;
+		for (i = 0; i < inlen; i++) {
 			sscanf(&append[2 * i], "%02x", &x);
 			append[i] = x;
 		}
+
+		return inlen;
 	}
+
+	/* DECODE_ECHO */
+	for (i = 0, o = 0; i < inlen; o++) {
+		int n;
+
+		if (append[i] != '\\') {
+			append[o] = append[i];
+			i++;
+			continue;
+		}
+
+		switch (append[i + 1]) {
+		case 'a':
+			append[o] = '\x07';
+			i += 2;
+			break;
+		case 'b':
+			append[o] = '\x08';
+			i += 2;
+			break;
+		case 't':
+			append[o] = '\x09';
+			i += 2;
+			break;
+		case 'n':
+			append[o] = '\x0a';
+			i += 2;
+			break;
+		case 'v':
+			append[o] = '\x0b';
+			i += 2;
+			break;
+		case 'f':
+			append[o] = '\x0c';
+			i += 2;
+			break;
+		case 'r':
+			append[o] = '\x0d';
+			i += 2;
+			break;
+		case 'e':
+			append[o] = '\x1b';
+			i += 2;
+			break;
+		case 'x':
+			sscanf(&append[i + 2], "%02x%n", &x, &n);
+			append[o] = x;
+			i += 2 + n;
+			break;
+		case '0':
+			sscanf(&append[i + 2], "%03o%n", &x, &n);
+			append[o] = x;
+			i += 2 + n;
+			break;
+
+		case '\\':
+		case '\0':
+		default:
+			append[o] = '\\';
+			i += 2;
+			break;
+		}
+	}
+
+	append[o] = '\0';
+
+	return o;
 }
 
 
@@ -115,7 +201,7 @@ int main(int argc, char **argv) {
 	const char *prefixhash;
 	char *append;
 	size_t appendlen;
-	int appendhex = 0;
+	enum decode appenddecode = DECODE_ECHO;
 	size_t minlen = 0, maxlen = SHA_CBLOCK;
 
 
@@ -133,8 +219,15 @@ int main(int argc, char **argv) {
 			maxlen = strtol(st.argval, NULL, 0);
 			break;
 
-		case 'x':
-			appendhex = 1;
+		case 'd':
+			if (strcmp(st.argval, "raw") == 0)
+				appenddecode = DECODE_RAW;
+			else if (strcmp(st.argval, "hex") == 0)
+				appenddecode = DECODE_HEX;
+			else if (strcmp(st.argval, "echo") == 0)
+				appenddecode = DECODE_ECHO;
+			else
+				custom_error("%s not a valid value for --append-decode", st.argval);
 			break;
 
 		default:
@@ -155,18 +248,12 @@ int main(int argc, char **argv) {
 	goh_fini(&st);
 
 
-	/* Command line checking and conversion */
-
+	/* Command line checking */
 	if (strlen(prefixhash) != 2 * SHA_DIGEST_LENGTH)
 		custom_error("sha1(prefix) must be %d hex characters long", 2 * SHA_DIGEST_LENGTH);
 
-	appendlen = strlen(append);
-
-	if (appendlen % 2 != 0)
-		custom_error("hex(append) must have an even length");
-
 	/* Decode the append string */
-	decode_append(append, &appendlen, appendhex);
+	appendlen = decode_append(append, appenddecode);
 
 	sha1append(prefixhash, append, appendlen, minlen, maxlen);
 

@@ -81,6 +81,10 @@ Additionally, some bounds on the data length can be given. The option
 --min-length is given, the data length tried start with this value, the default
 is 0. The option --max-length states the maximal data length, the default is 64.
 
---append-hex can be given to state that the postfix data is given in pure
-hexadecimal form. For instance "helloworld" is given as 68656c6c6f776f726c64.
-This allows to append arbitrary binary data.
+--append-decode can be given to state how to decode the postfix data. 3 valid
+values are defined for this option.
+	'raw' doesn't decode anything
+	'hex' assume the append string is encoded in pure hexadecimal form. For
+		instance "helloworld" is given as 68656c6c6f776f726c64.
+	'echo' decode the string like the unix command echo -e would. This
+		allows escaped characters like \n or sequences like \x0a.
