@@ -38,7 +38,8 @@ new hash. See the next section for the output format.
 
 How to use it?
 ==============
-$ ./sha1appender sha1ofunknowndata postfixdatainhex [[minlength] maxlength]
+$ ./sha1appender [options] sha1ofunknowndata postfixdatainhex
+Options may include --min-length and --max-length.
 
 Example
 -------
@@ -74,7 +75,6 @@ $ echo -n "unknowndata\x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x
 The result of the sha1sum command is hash predicted by sha1appender while it
 didn't know about "unknowndata".
 
-Additionally, some bounds on the data length can be given. If a single
-additional argument is given it's the maximal data length for which the padding
-is generated. If two are given, they're the minimum length and the maximum
-length.
+Additionally, some bounds on the data length can be given. The option
+--min-length is given, the data length tried start with this value, the default
+is 0. The option --max-length states the maximal data length, the default is 64.
