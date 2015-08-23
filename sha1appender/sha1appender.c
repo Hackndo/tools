@@ -11,8 +11,12 @@
 
 
 static struct goh_option opt_desc[] = {
-	{"min-length", 'm', GOH_ARG_REQUIRED, 'm', "Minimum data length tried."},
-	{"max-length", 'M', GOH_ARG_REQUIRED, 'M', "Maximum data length tried."}
+	{"min-length", 'm', GOH_ARG_REQUIRED, 'm',
+		"Minimum data length tried."},
+	{"max-length", 'M', GOH_ARG_REQUIRED, 'M',
+		"Maximum data length tried."},
+	{"append-hex", 'x', GOH_ARG_REFUSED, 'x',
+		"The string to append is given in hexadecimal."},
 };
 
 
@@ -28,6 +32,21 @@ void printhash(unsigned char *md) {
 void printhashnl(unsigned char *md) {
 	printhash(md);
 	printf("\n");
+}
+
+
+void decode_append(char *append, size_t *appendlen, int appendhex) {
+	size_t i;
+
+	/* Hex decoding "4142" is "AB" */
+	if (appendhex) {
+		*appendlen /= 2;
+		for (i = 0; i < *appendlen; i++) {
+			unsigned x;
+			sscanf(&append[2 * i], "%02x", &x);
+			append[i] = x;
+		}
+	}
 }
 
 
@@ -96,8 +115,8 @@ int main(int argc, char **argv) {
 	const char *prefixhash;
 	char *append;
 	size_t appendlen;
+	int appendhex = 0;
 	size_t minlen = 0, maxlen = SHA_CBLOCK;
-	size_t i;
 
 
 	/* Options parsing */
@@ -112,6 +131,10 @@ int main(int argc, char **argv) {
 
 		case 'M':
 			maxlen = strtol(st.argval, NULL, 0);
+			break;
+
+		case 'x':
+			appendhex = 1;
 			break;
 
 		default:
@@ -142,13 +165,8 @@ int main(int argc, char **argv) {
 	if (appendlen % 2 != 0)
 		custom_error("hex(append) must have an even length");
 
-	/* Decode the hex of append */
-	appendlen /= 2;
-	for (i = 0; i < appendlen; i++) {
-		unsigned x;
-		sscanf(&append[2 * i], "%02x", &x);
-		append[i] = x;
-	}
+	/* Decode the append string */
+	decode_append(append, &appendlen, appendhex);
 
 	sha1append(prefixhash, append, appendlen, minlen, maxlen);
 

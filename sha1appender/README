@@ -38,12 +38,12 @@ new hash. See the next section for the output format.
 
 How to use it?
 ==============
-$ ./sha1appender [options] sha1ofunknowndata postfixdatainhex
+$ ./sha1appender [options] sha1ofunknowndata postfixdata
 Options may include --min-length and --max-length.
 
 Example
 -------
-$ ./sha1appender 0159c73428725dfed59f0c6fed7f0a7940f28388 68656c6c6f776f726c64
+$ ./sha1appender 0159c73428725dfed59f0c6fed7f0a7940f28388 helloworld
 0: 66e6b39bb3f90f069abe24eb6ae8d7f7caf7533c \x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x68\x65\x6c\x6c\x6f\x77\x6f\x72\x6c\x64
 1: 66e6b39bb3f90f069abe24eb6ae8d7f7caf7533c \x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x08\x68\x65\x6c\x6c\x6f\x77\x6f\x72\x6c\x64
 2: 66e6b39bb3f90f069abe24eb6ae8d7f7caf7533c \x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x68\x65\x6c\x6c\x6f\x77\x6f\x72\x6c\x64
@@ -53,8 +53,8 @@ Input
 -----
 0159c73428725dfed59f0c6fed7f0a7940f28388 is the has of some unknown prefix data
 (actually it's litterally "unknowndata").
-68656c6c6f776f726c64 is the postfix data encoded in hex. In this case it's
-"helloworld". It is encoded in hex to allow you to input some nul bytes.
+"helloworld" is the postfix data that are to be appended to the data that
+generated the previous hash.
 
 Output
 ------
@@ -75,6 +75,12 @@ $ echo -n "unknowndata\x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x
 The result of the sha1sum command is hash predicted by sha1appender while it
 didn't know about "unknowndata".
 
+Options
+-------
 Additionally, some bounds on the data length can be given. The option
 --min-length is given, the data length tried start with this value, the default
 is 0. The option --max-length states the maximal data length, the default is 64.
+
+--append-hex can be given to state that the postfix data is given in pure
+hexadecimal form. For instance "helloworld" is given as 68656c6c6f776f726c64.
+This allows to append arbitrary binary data.
