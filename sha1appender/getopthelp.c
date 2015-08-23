@@ -186,6 +186,7 @@ int goh_nextoption(struct goh_state *state) {
 
 	if (state->autohelp && val == 'h') {
 		goh_printhelp(state, stdout);
+		goh_fini(state);
 		exit(EXIT_SUCCESS);
 	}
 
@@ -208,6 +209,7 @@ int goh_nextoption(struct goh_state *state) {
 
 	if (state->autohelp) {
 		goh_printhelp(state, stderr);
+		goh_fini(state);
 		exit(EXIT_FAILURE);
 	}
 
